@@ -1,0 +1,66 @@
+---
+description: A Slack bot that helps teams decide where to eat lunch by picking a restaurant fairly.
+---
+
+***definitions***
+
+- :Restaurant: is a place to eat that a team considers for lunch.
+  - Name - the restaurant's name (required)
+  - Address - a physical address or URL identifying the location (required)
+
+- :RestaurantList: is the collection of :Restaurant: entries for a Slack workspace.
+  - One :RestaurantList: exists per workspace.
+  - Any workspace member can add or remove :Restaurant: entries.
+
+- :SlackWorkspace: is the Slack workspace the bot is installed in.
+
+- :SlackUser: is a member of :SlackWorkspace: who interacts with the bot.
+
+***implementation reqs***
+
+- :Implementation: should be in Python 3.12.
+- :Implementation: should use pip for dependency management.
+- :Implementation: should use Slack Bolt for Python (`slack_bolt`) to handle slash commands and request verification.
+- :Implementation: should use SQLite (via the standard library `sqlite3` module) for persistent storage.
+  - The SQLite database file path should be configurable via an environment variable, defaulting to `lunch_picker.db`.
+- :Implementation: should follow a flat package structure with three modules:
+  - `app.py` — entry point; initialises the Bolt app and starts the HTTP server.
+  - `commands.py` — slash command handlers for `/lunch` sub-commands.
+  - `db.py` — all database access (create table, add, remove, list restaurants).
+- :Implementation: should store :RestaurantList: entries in a single SQLite table keyed by workspace ID.
+- :UnitTests: should use pytest.
+- :UnitTests: should live in a `tests/` directory at the project root.
+  - Test files should be named `test_<module>.py` (e.g. `test_db.py`, `test_commands.py`).
+- :UnitTests: should use an in-memory SQLite database (pass `check_same_thread=False` to sqlite3) to avoid writing to the filesystem.
+- :UnitTests: should mock Slack Bolt's `say` callable with a simple stub to capture bot replies.
+- :UnitTests: are executed via [test_scripts/run_unittests_python.sh](test_scripts/run_unittests_python.sh).
+
+***functional specs***
+
+- Implement the entry point for the Slack bot.
+  - The bot listens for incoming slash command requests on a configurable HTTP port.
+  - It registers a handler for the `/lunch` slash command and routes sub-commands.
+  - On startup, the bot reads its Slack signing secret, bot token, and port from environment variables.
+
+- A :SlackUser: should be able to add a :Restaurant: to :RestaurantList: using `/lunch add <name> <address>`.
+  - Both `<name>` and `<address>` are required non-empty arguments.
+  - If either argument is missing, the bot replies with: `Usage: /lunch add <name> <address>`.
+  - A :Restaurant: name must be unique within the :SlackWorkspace:'s :RestaurantList:.
+    - If a duplicate name is submitted, the bot replies that the restaurant already exists.
+  - On success, the bot stores the new :Restaurant: and replies with a confirmation of the name and address.
+
+- A :SlackUser: should be able to remove a :Restaurant: from :RestaurantList: using `/lunch remove <name>`.
+  - `<name>` is a required non-empty argument.
+  - If the argument is missing, the bot replies with: `Usage: /lunch remove <name>`.
+  - If no :Restaurant: with the given name exists in the :SlackWorkspace:'s :RestaurantList:,
+    - the bot replies that the restaurant was not found.
+  - On success, the bot removes the :Restaurant: and replies with a confirmation.
+
+- A :SlackUser: should be able to list all :Restaurant: entries using `/lunch list`.
+  - The bot replies with each :Restaurant: name and address in the :SlackWorkspace:'s :RestaurantList:.
+  - If :RestaurantList: is empty, the bot replies that no restaurants have been added yet.
+
+- A :SlackUser: should be able to get a random :Restaurant: suggestion using `/lunch pick`.
+  - The bot selects one :Restaurant: at random from the :SlackWorkspace:'s :RestaurantList:.
+  - The bot replies with the selected :Restaurant:'s name and address.
+  - If :RestaurantList: is empty, the bot replies that no restaurants have been added yet.

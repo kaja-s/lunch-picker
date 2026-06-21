@@ -1,0 +1,2 @@
+slack-bolt==1.20.0
+pytest==8.2.0
