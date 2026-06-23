@@ -1,58 +1,36 @@
 import os
 import logging
 from slack_bolt import App
-from slack_bolt.adapter.socket_mode import SocketModeHandler
 from db import initialize_db
 from commands import handle_lunch_command
 
-# Setup logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def create_app():
-    """
-    Factory function to initialize the Slack Bolt App and database.
-    """
-    # Environment variables
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    signing_secret = os.environ.get("SLACK_SIGNING_SECRET")
-    db_path = os.environ.get("DATABASE_PATH", "lunch_bot.db")
-    
-    if not token or not signing_secret:
-        error_msg = "Missing SLACK_BOT_TOKEN or SLACK_SIGNING_SECRET in environment variables."
-        logger.error(error_msg)
-        raise EnvironmentError(error_msg)
+# Load configuration from environment
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
+PORT = int(os.environ.get("PORT", 3000))
+DB_PATH = os.environ.get("DB_PATH", "lunch.db")
 
-    # Initialize Database
-    try:
-        conn = initialize_db(db_path)
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
+if not SLACK_BOT_TOKEN or not SLACK_SIGNING_SECRET:
+    raise ValueError("SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET must be set in environment.")
 
-    # Initialize Bolt App
-    # We use the standard HTTP server adapter by default
-    app = App(
-        token=token,
-        signing_secret=signing_secret
-    )
+# Initialize Bolt App
+app = App(
+    token=SLACK_BOT_TOKEN,
+    signing_secret=SLACK_SIGNING_SECRET
+)
 
-    # Register command handlers
-    # Use a lambda to inject the database connection into the handler
-    @app.command("/lunch")
-    def lunch_command(ack, body, respond):
-        handle_lunch_command(ack, body, respond, conn)
+# Initialize Database
+db_conn = initialize_db(DB_PATH)
 
-    return app
+@app.command("/lunch")
+def lunch_command(ack, body, respond):
+    """Routes the /lunch slash command to the logic handler."""
+    handle_lunch_command(ack, body, respond, db_conn)
 
 if __name__ == "__main__":
-    # Get port from environment or default to 3000
-    port = int(os.environ.get("PORT", 3000))
-    
-    try:
-        bolt_app = create_app()
-        logger.info(f"Starting Slack Bot server on port {port}...")
-        bolt_app.start(port=port)
-    except Exception as e:
-        logger.critical(f"App failed to start: {e}", exc_info=True)
-        exit(1)
+    logger.info(f"Starting Slack bot on port {PORT}...")
+    app.start(port=PORT)
