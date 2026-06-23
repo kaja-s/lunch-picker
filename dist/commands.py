@@ -1,55 +1,99 @@
-import random
-from db import add_restaurant, list_restaurants, remove_restaurant
+import logging
+from slack_bolt import Respond
+from sqlite3 import Connection
 
-def handle_lunch_command(ack, body, say):
+logger = logging.getLogger(__name__)
+
+def handle_lunch_command(ack, body, respond: Respond, conn: Connection):
+    """
+    Main dispatcher for the /lunch slash command.
+    """
+    # Acknowledge the command immediately as required by Slack API
     ack()
+    
     text = body.get("text", "").strip()
+    user_id = body.get("user_id")
     workspace_id = body.get("team_id")
     
+    logger.info(f"Received /lunch command from user {user_id} in workspace {workspace_id} with text: '{text}'")
+
     if not text:
-        say("Usage: `/lunch add <name> <address>`, `/lunch list`, `/lunch pick`, or `/lunch remove <name>`")
+        respond("Welcome to Lunch Bot! Use `/lunch help` to see available commands.")
         return
 
-    parts = text.split(maxsplit=2)
+    # Basic routing logic for sub-commands
+    parts = text.split(maxsplit=1)
     subcommand = parts[0].lower()
+    remaining_text = parts[1] if len(parts) > 1 else ""
 
-    try:
-        if subcommand == "add":
-            if len(parts) < 3:
-                say("Usage: /lunch add <name> <address>")
-                return
-            name, address = parts[1], parts[2]
-            add_restaurant(workspace_id, name, address)
-            say(f"Added *{name}* ({address}) to the lunch list.")
+    if subcommand == "add":
+        # Expecting: /lunch add <name> <address>
+        # We use maxsplit=1 on remaining_text to get name and address
+        args = remaining_text.split(maxsplit=1)
+        if len(args) < 2:
+            respond("Usage: /lunch add <name> <address>")
+            return
 
-        elif subcommand == "list":
-            restaurants = list_restaurants(workspace_id)
+        name, address = args[0], args[1]
+        try:
+            from db import add_restaurant
+            add_restaurant(conn, workspace_id, name, address)
+            respond(f"Added restaurant: *{name}* at {address}")
+        except ValueError as e:
+            # Check if it's the duplicate name error defined in db.py
+            if "already exists" in str(e):
+                respond(f"Error: Restaurant '{name}' already exists in this workspace.")
+            else:
+                respond(f"Error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Failed to add restaurant: {e}", exc_info=True)
+            respond(f"An unexpected error occurred while adding the restaurant: {str(e)}")
+        return
+
+    if subcommand == "list":
+        try:
+            from db import list_restaurants
+            restaurants = list_restaurants(conn, workspace_id)
             if not restaurants:
-                say("No restaurants have been added yet.")
+                respond("No restaurants have been added yet.")
             else:
-                resp = "\n".join([f"• *{r['name']}* - {r['address']}" for r in restaurants])
-                say(f"Here are the restaurants:\n{resp}")
+                formatted_list = "\n".join([f"• *{name}*: {address}" for name, address in restaurants])
+                respond(f"Here are the restaurants in your list:\n{formatted_list}")
+        except Exception as e:
+            logger.error(f"Failed to list restaurants: {e}", exc_info=True)
+            respond(f"An unexpected error occurred while listing restaurants: {str(e)}")
+        return
 
-        elif subcommand == "remove":
-            if len(parts) < 2:
-                say("Usage: /lunch remove <name>")
-                return
-            name = parts[1]
-            if remove_restaurant(workspace_id, name):
-                say(f"Removed *{name}* from the lunch list.")
+    if subcommand == "remove":
+        # Expecting: /lunch remove <name>
+        name = remaining_text.strip()
+        if not name:
+            respond("Usage: /lunch remove <name>")
+            return
+
+        try:
+            from db import remove_restaurant
+            if remove_restaurant(conn, workspace_id, name):
+                respond(f"Removed restaurant: *{name}*")
             else:
-                say(f"Restaurant *{name}* not found in the lunch list.")
+                respond(f"Error: Restaurant '{name}' was not found.")
+        except Exception as e:
+            logger.error(f"Failed to remove restaurant: {e}", exc_info=True)
+            respond(f"An unexpected error occurred while removing the restaurant: {str(e)}")
+        return
 
-        elif subcommand == "pick":
-            restaurants = list_restaurants(workspace_id)
-            if not restaurants:
-                say("No restaurants have been added yet.")
+    if subcommand == "pick":
+        try:
+            from db import pick_restaurant
+            picked = pick_restaurant(conn, workspace_id)
+            if not picked:
+                respond("No restaurants have been added yet.")
             else:
-                choice = random.choice(restaurants)
-                say(f"Today's lunch spot: *{choice['name']}* ({choice['address']})")
-        
-        else:
-            say(f"Unknown subcommand: `{subcommand}`. Try `add`, `list`, `pick`, or `remove`.")
+                name, address = picked
+                respond(f"How about *{name}*?\nAddress: {address}")
+        except Exception as e:
+            logger.error(f"Failed to pick restaurant: {e}", exc_info=True)
+            respond(f"An unexpected error occurred while picking a restaurant: {str(e)}")
+        return
 
-    except Exception as e:
-        say(f"An error occurred: {str(e)}")
+    respond(f"Command '{subcommand}' received. This functionality is being implemented.")

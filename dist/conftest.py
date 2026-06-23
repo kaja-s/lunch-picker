@@ -1,5 +1,2 @@
-import sys
-import os
-
-# Ensure the root directory is in sys.path so that 'db' and 'commands' can be imported.
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# This file ensures that the root directory is added to sys.path
+# so that tests can import modules from the project root.

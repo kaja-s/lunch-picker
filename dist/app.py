@@ -2,28 +2,57 @@ import os
 import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from db import init_db
+from db import initialize_db
 from commands import handle_lunch_command
 
-# Configuration
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
-PORT = int(os.environ.get("PORT", 3000))
-
-# Initialize Logger
+# Setup logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Check for required environment variables
-if not SLACK_BOT_TOKEN or not SLACK_SIGNING_SECRET:
-    raise RuntimeError("SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET must be set.")
+def create_app():
+    """
+    Factory function to initialize the Slack Bolt App and database.
+    """
+    # Environment variables
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET")
+    db_path = os.environ.get("DATABASE_PATH", "lunch_bot.db")
+    
+    if not token or not signing_secret:
+        error_msg = "Missing SLACK_BOT_TOKEN or SLACK_SIGNING_SECRET in environment variables."
+        logger.error(error_msg)
+        raise EnvironmentError(error_msg)
 
-app = App(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
+    # Initialize Database
+    try:
+        conn = initialize_db(db_path)
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
-# Register command handler
-app.command("/lunch")(handle_lunch_command)
+    # Initialize Bolt App
+    # We use the standard HTTP server adapter by default
+    app = App(
+        token=token,
+        signing_secret=signing_secret
+    )
+
+    # Register command handlers
+    # Use a lambda to inject the database connection into the handler
+    @app.command("/lunch")
+    def lunch_command(ack, body, respond):
+        handle_lunch_command(ack, body, respond, conn)
+
+    return app
 
 if __name__ == "__main__":
-    init_db()
-    # Starting standard HTTP server (Bolt default)
-    # Using start() for HTTP mode as per standard Bolt usage
-    app.start(port=PORT)
+    # Get port from environment or default to 3000
+    port = int(os.environ.get("PORT", 3000))
+    
+    try:
+        bolt_app = create_app()
+        logger.info(f"Starting Slack Bot server on port {port}...")
+        bolt_app.start(port=port)
+    except Exception as e:
+        logger.critical(f"App failed to start: {e}", exc_info=True)
+        exit(1)
