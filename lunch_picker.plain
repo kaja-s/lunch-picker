@@ -38,6 +38,15 @@ description: A Slack bot that helps teams decide where to eat lunch by picking a
 - :UnitTests: should mock Slack Bolt's `respond` callable with a simple stub to capture bot replies.
 - :UnitTests: are executed via [test_scripts/run_unittests_python.sh](test_scripts/run_unittests_python.sh).
 
+***test reqs***
+
+- :ConformanceTests: should use pytest framework.
+- :ConformanceTests: will be run using the "pytest" command.
+- :ConformanceTests: must be implemented and executed — do not use pytest.skip().
+- :ConformanceTests: should mock Slack Bolt's `respond` callable with a stub to capture bot replies.
+- :ConformanceTests: should use an in-memory or temporary SQLite database.
+- :ConformanceTests: are executed via the run script [test_scripts/run_conformance_tests_python.sh](test_scripts/run_conformance_tests_python.sh).
+
 ***functional specs***
 
 - Implement `initialize_db(db_path)` in `db.py` to set up the SQLite database.
