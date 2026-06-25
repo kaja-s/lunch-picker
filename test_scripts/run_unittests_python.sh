@@ -17,7 +17,11 @@ if [ -z "$1" ]; then
   exit 1
 fi
 SOURCE_FOLDER="$1"
-echo "Source build folder: $(cd "$SOURCE_FOLDER" 2>/dev/null && pwd || echo "$SOURCE_FOLDER (not yet resolved)")"
+if [ ! -d "$SOURCE_FOLDER" ]; then
+  echo "Error: Source build folder '$SOURCE_FOLDER' does not exist or is not a directory."
+  exit 2
+fi
+echo "Source build folder: $(cd "$SOURCE_FOLDER" && pwd)"
 
 echo ""
 echo "===== [3/7] Working directory setup ====="
@@ -40,7 +44,7 @@ echo "Copy complete."
 echo ""
 echo "===== [5/7] Enter working directory ====="
 echo "Moving to: $(pwd)/$WORKING_FOLDER"
-cd "$WORKING_FOLDER" || { echo "Error: Could not enter '$WORKING_FOLDER'."; exit 2; }
+cd "$WORKING_FOLDER" || { echo "Error: Could not enter '$WORKING_FOLDER'."; exit 69; }
 echo "Now in: $(pwd)"
 
 echo ""
