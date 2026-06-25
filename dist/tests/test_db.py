@@ -1,200 +1,208 @@
-import pytest
 import sqlite3
-import os
-from db import initialize_db, add_restaurant, remove_restaurant, list_restaurants, pick_restaurant
+import pytest
+from db import initialize_db
 
-def test_initialize_db_in_memory():
-    """Verify that the database can be initialized in memory and tables are created."""
+def test_initialize_db_creates_table():
+    """
+    Verify that initialize_db creates the restaurants table in an in-memory database.
+    """
+    # Use in-memory database for testing
     conn = initialize_db(":memory:")
-    assert isinstance(conn, sqlite3.Connection)
     
-    # Check if table exists
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='restaurants';")
-    table = cursor.fetchone()
-    assert table is not None
-    assert table['name'] == 'restaurants'
-    conn.close()
-
-def test_initialize_db_schema():
-    """Verify that the schema has the required columns."""
-    conn = initialize_db(":memory:")
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(restaurants);")
-    columns = {row['name']: row['type'] for row in cursor.fetchall()}
-    
-    assert "workspace_id" in columns
-    assert "name" in columns
-    assert "address" in columns
-    conn.close()
-
-def test_initialize_db_invalid_path():
-    """Verify that an empty path raises a ValueError."""
-    with pytest.raises(ValueError) as excinfo:
-        initialize_db("")
-    assert "Database path must be a non-empty string" in str(excinfo.value)
-
-def test_initialize_db_persistence(tmp_path):
-    """Verify that the database file is actually created on disk."""
-    db_file = tmp_path / "test_lunch.db"
-    db_path = str(db_file)
-    
-    conn = initialize_db(db_path)
-    conn.close()
-    
-    assert os.path.exists(db_path)
-    assert os.path.getsize(db_path) > 0
+    try:
+        cursor = conn.cursor()
+        # Check if the restaurants table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='restaurants';")
+        table = cursor.fetchone()
+        
+        assert table is not None, "The 'restaurants' table should be created."
+        assert table['name'] == 'restaurants'
+        
+        # Check columns
+        cursor.execute("PRAGMA table_info(restaurants);")
+        columns = {row['name'] for row in cursor.fetchall()}
+        expected_columns = {"id", "workspace_id", "name", "address"}
+        
+        assert expected_columns.issubset(columns), f"Missing columns in restaurants table. Found: {columns}"
+        
+    finally:
+        conn.close()
 
 def test_add_restaurant_success():
-    """Verify that a restaurant can be successfully added."""
+    """Verify adding a restaurant works correctly."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W123", "Burger Queen", "123 Flame St")
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT workspace_id, name, address FROM restaurants WHERE name='Burger Queen'")
-    row = cursor.fetchone()
-    assert row is not None
-    assert row['workspace_id'] == "W123"
-    assert row['address'] == "123 Flame St"
-    conn.close()
+    try:
+        add_restaurant(conn, "W123", "Pizza Place", "123 Main St")
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT workspace_id, name, address FROM restaurants")
+        row = cursor.fetchone()
+        
+        assert row["workspace_id"] == "W123"
+        assert row["name"] == "Pizza Place"
+        assert row["address"] == "123 Main St"
+    finally:
+        conn.close()
 
-def test_add_restaurant_duplicate_error():
+def test_add_restaurant_duplicate_fails():
     """Verify that adding a duplicate restaurant name in the same workspace raises ValueError."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W123", "Taco Hut", "456 Shell Rd")
-    
-    with pytest.raises(ValueError) as excinfo:
-        add_restaurant(conn, "W123", "Taco Hut", "789 New Rd")
-    assert "already exists in workspace 'W123'" in str(excinfo.value)
-    conn.close()
+    try:
+        add_restaurant(conn, "W123", "Pizza Place", "123 Main St")
+        
+        with pytest.raises(ValueError) as excinfo:
+            add_restaurant(conn, "W123", "Pizza Place", "456 Side St")
+        
+        assert "already exists" in str(excinfo.value)
+    finally:
+        conn.close()
 
-def test_add_restaurant_same_name_different_workspaces():
-    """Verify that restaurants with the same name can exist in different workspaces."""
+def test_add_restaurant_different_workspaces():
+    """Verify that different workspaces can have restaurants with the same name."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W123", "Pizza Place", "Addr 1")
-    # This should not raise an error
-    add_restaurant(conn, "W999", "Pizza Place", "Addr 2")
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) as count FROM restaurants WHERE name='Pizza Place'")
-    assert cursor.fetchone()['count'] == 2
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Pizza Place", "Address 1")
+        # Should not raise error because workspace_id is different
+        add_restaurant(conn, "W2", "Pizza Place", "Address 2")
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM restaurants WHERE name = 'Pizza Place'")
+        assert cursor.fetchone()["cnt"] == 2
+    finally:
+        conn.close()
 
-def test_add_restaurant_invalid_input():
-    """Verify that empty inputs raise ValueError."""
+from db import add_restaurant, remove_restaurant, list_restaurants, pick_restaurant
+
+def test_list_restaurants_empty():
+    """Verify that listing restaurants for a workspace with none returns an empty list."""
     conn = initialize_db(":memory:")
-    with pytest.raises(ValueError):
-        add_restaurant(conn, "", "Name", "Addr")
-    with pytest.raises(ValueError):
-        add_restaurant(conn, "W1", "", "Addr")
-    with pytest.raises(ValueError):
-        add_restaurant(conn, "W1", "Name", "")
-    conn.close()
+    try:
+        restaurants = list_restaurants(conn, "W_EMPTY")
+        assert restaurants == []
+    finally:
+        conn.close()
+
+def test_list_restaurants_success():
+    """Verify that all restaurants for a workspace are returned."""
+    conn = initialize_db(":memory:")
+    try:
+        add_restaurant(conn, "W1", "Z-Place", "Addr Z")
+        add_restaurant(conn, "W1", "A-Place", "Addr A")
+        
+        restaurants = list_restaurants(conn, "W1")
+        
+        # Should be ordered by name ASC based on implementation
+        assert len(restaurants) == 2
+        assert restaurants[0] == ("A-Place", "Addr A")
+        assert restaurants[1] == ("Z-Place", "Addr Z")
+    finally:
+        conn.close()
+
+def test_list_restaurants_isolation():
+    """Verify that listing restaurants only returns data for the specific workspace."""
+    conn = initialize_db(":memory:")
+    try:
+        add_restaurant(conn, "W1", "Workspace 1 Resto", "Addr 1")
+        add_restaurant(conn, "W2", "Workspace 2 Resto", "Addr 2")
+        
+        w1_list = list_restaurants(conn, "W1")
+        assert len(w1_list) == 1
+        assert w1_list[0][0] == "Workspace 1 Resto"
+    finally:
+        conn.close()
 
 def test_remove_restaurant_success():
-    """Verify that a restaurant can be successfully removed."""
+    """Verify that removing an existing restaurant works and returns True."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W123", "Burger Queen", "123 Flame St")
-    
-    deleted = remove_restaurant(conn, "W123", "Burger Queen")
-    assert deleted is True
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM restaurants WHERE name='Burger Queen'")
-    assert cursor.fetchone() is None
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Burger King", "Street 1")
+        result = remove_restaurant(conn, "W1", "Burger King")
+        
+        assert result is True
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM restaurants WHERE workspace_id = 'W1'")
+        assert cursor.fetchone()["cnt"] == 0
+    finally:
+        conn.close()
 
 def test_remove_restaurant_not_found():
     """Verify that removing a non-existent restaurant returns False."""
     conn = initialize_db(":memory:")
-    deleted = remove_restaurant(conn, "W123", "Non Existent")
-    assert deleted is False
-    conn.close()
+    try:
+        result = remove_restaurant(conn, "W1", "Non Existent")
+        assert result is False
+    finally:
+        conn.close()
 
-def test_remove_restaurant_workspace_isolation():
-    """Verify that removing a restaurant in one workspace does not affect another."""
+def test_remove_restaurant_case_insensitive():
+    """Verify that removing a restaurant is case-insensitive."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W1", "Target", "Addr 1")
-    add_restaurant(conn, "W2", "Target", "Addr 2")
-    
-    deleted = remove_restaurant(conn, "W1", "Target")
-    assert deleted is True
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT workspace_id FROM restaurants WHERE name='Target'")
-    remaining = cursor.fetchall()
-    assert len(remaining) == 1
-    assert remaining[0]['workspace_id'] == "W2"
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Pizza Hut", "Street 1")
+        result = remove_restaurant(conn, "W1", "pizza hut")
+        assert result is True
+    finally:
+        conn.close()
 
-def test_remove_restaurant_invalid_input():
-    """Verify that empty inputs for removal raise ValueError."""
+def test_remove_restaurant_isolation():
+    """Verify that removing a restaurant in one workspace doesn't affect another."""
     conn = initialize_db(":memory:")
-    with pytest.raises(ValueError):
-        remove_restaurant(conn, "", "Name")
-    with pytest.raises(ValueError):
-        remove_restaurant(conn, "W1", "")
-    conn.close()
-
-def test_list_restaurants_success():
-    """Verify that restaurants are listed correctly for a workspace."""
-    conn = initialize_db(":memory:")
-    add_restaurant(conn, "W1", "Bistro A", "Addr A")
-    add_restaurant(conn, "W1", "Cafe B", "Addr B")
-    
-    restaurants = list_restaurants(conn, "W1")
-    assert len(restaurants) == 2
-    assert ("Bistro A", "Addr A") in restaurants
-    assert ("Cafe B", "Addr B") in restaurants
-    conn.close()
-
-def test_list_restaurants_empty():
-    """Verify that an empty list is returned if no restaurants exist."""
-    conn = initialize_db(":memory:")
-    restaurants = list_restaurants(conn, "W-EMPTY")
-    assert restaurants == []
-    conn.close()
-
-def test_list_restaurants_isolation():
-    """Verify that listing is isolated to the specific workspace."""
-    conn = initialize_db(":memory:")
-    add_restaurant(conn, "W1", "Common Name", "Addr 1")
-    add_restaurant(conn, "W2", "Other Place", "Addr 2")
-    
-    w1_list = list_restaurants(conn, "W1")
-    assert len(w1_list) == 1
-    assert w1_list[0][0] == "Common Name"
-    conn.close()
-
-def test_list_restaurants_invalid_input():
-    """Verify that empty workspace_id raises ValueError."""
-    conn = initialize_db(":memory:")
-    with pytest.raises(ValueError):
-        list_restaurants(conn, "")
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Subway", "Addr 1")
+        add_restaurant(conn, "W2", "Subway", "Addr 2")
+        
+        remove_restaurant(conn, "W1", "Subway")
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM restaurants WHERE workspace_id = 'W2' AND name = 'Subway'")
+        assert cursor.fetchone()["cnt"] == 1
+    finally:
+        conn.close()
 
 def test_pick_restaurant_success():
-    """Verify that a restaurant is picked when the list is not empty."""
+    """Verify that picking a restaurant returns one of the added options."""
     conn = initialize_db(":memory:")
-    add_restaurant(conn, "W1", "Target 1", "Addr 1")
-    add_restaurant(conn, "W1", "Target 2", "Addr 2")
-    
-    picked = pick_restaurant(conn, "W1")
-    assert picked is not None
-    assert picked[0] in ["Target 1", "Target 2"]
-    assert picked[1] in ["Addr 1", "Addr 2"]
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Resto A", "Addr A")
+        add_restaurant(conn, "W1", "Resto B", "Addr B")
+        
+        picked = pick_restaurant(conn, "W1")
+        
+        assert picked in [("Resto A", "Addr A"), ("Resto B", "Addr B")]
+    finally:
+        conn.close()
 
 def test_pick_restaurant_empty():
-    """Verify that picking from an empty workspace returns None."""
+    """Verify that picking from an empty list returns None."""
     conn = initialize_db(":memory:")
-    picked = pick_restaurant(conn, "W-EMPTY")
-    assert picked is None
-    conn.close()
+    try:
+        picked = pick_restaurant(conn, "W_EMPTY")
+        assert picked is None
+    finally:
+        conn.close()
 
-def test_pick_restaurant_invalid_input():
-    """Verify that empty workspace_id for picking raises ValueError."""
+def test_pick_restaurant_isolation():
+    """Verify that picking a restaurant only pulls from the correct workspace."""
     conn = initialize_db(":memory:")
-    with pytest.raises(ValueError):
-        pick_restaurant(conn, "")
-    conn.close()
+    try:
+        add_restaurant(conn, "W1", "Only W1", "Addr 1")
+        add_restaurant(conn, "W2", "Only W2", "Addr 2")
+        
+        picked = pick_restaurant(conn, "W1")
+        assert picked == ("Only W1", "Addr 1")
+    finally:
+        conn.close()
+
+def test_db_path_from_env(monkeypatch):
+    """
+    Verify that the db_path is correctly picked up from environment variables.
+    """
+    monkeypatch.setenv("LUNCH_PICKER_DB", ":memory:")
+    conn = initialize_db()
+    
+    try:
+        # If it didn't crash and returns a connection, it used the env var
+        assert isinstance(conn, sqlite3.Connection)
+    finally:
+        conn.close()

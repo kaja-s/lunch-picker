@@ -1,120 +1,229 @@
 import pytest
 from unittest.mock import MagicMock
-from commands import handle_lunch_command
-from db import initialize_db
+from commands import register_commands
 
-class RespondStub:
-    """Stub to capture calls to the Slack respond utility."""
+class MockRespond:
     def __init__(self):
         self.calls = []
-    
     def __call__(self, text):
         self.calls.append(text)
 
-@pytest.fixture
-def db_conn():
-    conn = initialize_db(":memory:")
-    yield conn
-    conn.close()
-
-def test_handle_lunch_add(db_conn):
-    respond = RespondStub()
+def test_lunch_command_no_args():
+    """
+    Test /lunch with no arguments.
+    """
+    # Setup mock app and db
+    mock_app = MagicMock()
+    mock_db = MagicMock()
+    # The decorator @app.command("/lunch") calls app.command("/lunch")(handler)
+    # We make the first call return a mock that captures the handler
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    
+    register_commands(mock_app, mock_db)
+    
+    # Extract the handler function passed to the decorator
+    handler_func = handler_captor.call_args[0][0]
+    
     ack = MagicMock()
+    respond = MockRespond()
     body = {
+        "user_id": "U123",
         "team_id": "T123",
-        "text": "add BurgerJoint http://burger.com"
+        "text": ""
     }
     
-    handle_lunch_command(ack, body, respond, db_conn)
+    handler_func(ack, body, respond)
     
     ack.assert_called_once()
-    assert "Added restaurant: *BurgerJoint*" in respond.calls[0]
+    assert "Welcome to Lunch Picker!" in respond.calls[0]
 
-def test_handle_lunch_add_missing_args(db_conn):
-    respond = RespondStub()
-    ack = MagicMock()
-    # Missing address
-    body = {"team_id": "T123", "text": "add OnlyName"}
-    
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert respond.calls[0] == "Usage: /lunch add <name> <address>"
+def test_lunch_add_missing_args():
+    """Verify usage message when arguments are missing."""
+    mock_app = MagicMock()
+    mock_db = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, mock_db)
+    handler_func = handler_captor.call_args[0][0]
 
-def test_handle_lunch_remove_success(db_conn):
-    from db import add_restaurant
-    add_restaurant(db_conn, "T123", "OldPlace", "Addr")
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "add OnlyName"}
     
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "remove OldPlace"}
-    
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert "Removed restaurant: *OldPlace*" in respond.calls[0]
+    handler_func(MagicMock(), body, respond)
+    assert "Usage: /lunch add <name> <address>" in respond.calls[0]
 
-def test_handle_lunch_remove_missing_args(db_conn):
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "remove   "}
+def test_lunch_add_success():
+    """Verify successful addition of a restaurant via slash command."""
+    from db import initialize_db
+    # Use a real in-memory DB for integration-like unit test of the command
+    conn = initialize_db(":memory:")
     
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert respond.calls[0] == "Usage: /lunch remove <name>"
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
 
-def test_handle_lunch_remove_not_found(db_conn):
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "remove GhostRestaurant"}
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "add PizzaPlace 123_Main_St"}
     
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert "GhostRestaurant* not found" in respond.calls[0]
+    handler_func(MagicMock(), body, respond)
+    
+    assert "Added restaurant: *PizzaPlace* at 123_Main_St" in respond.calls[0]
+    
+    # Verify DB state
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM restaurants WHERE workspace_id='T1'")
+    assert cursor.fetchone()["name"] == "PizzaPlace"
 
-def test_handle_lunch_add_duplicate(db_conn):
-    from db import add_restaurant
-    add_restaurant(db_conn, "T123", "Repeat", "Addr")
+def test_lunch_add_duplicate():
+    """Verify error message when adding a duplicate restaurant."""
+    from db import initialize_db, add_restaurant
+    conn = initialize_db(":memory:")
+    add_restaurant(conn, "T1", "Existing", "Addr")
     
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "add Repeat NewAddr"}
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "add Existing NewAddr"}
     
-    handle_lunch_command(ack, body, respond, db_conn)
+    handler_func(MagicMock(), body, respond)
     assert "already exists" in respond.calls[0].lower()
 
-def test_handle_lunch_list_empty(db_conn):
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "list"}
-    
-    handle_lunch_command(ack, body, respond, db_conn)
-    
-    assert respond.calls[0] == "No restaurants have been added yet."
+def test_lunch_remove_missing_args():
+    """Verify usage message when name is missing for remove."""
+    mock_app = MagicMock()
+    mock_db = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, mock_db)
+    handler_func = handler_captor.call_args[0][0]
 
-def test_handle_lunch_pick_success(db_conn):
-    from db import add_restaurant
-    add_restaurant(db_conn, "T123", "Sushi Place", "123 Fish St")
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "remove"}
     
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "pick"}
-    
-    handle_lunch_command(ack, body, respond, db_conn)
-    
-    ack.assert_called_once()
-    assert "Today's lunch recommendation is: *Sushi Place* (123 Fish St)" in respond.calls[0]
+    handler_func(MagicMock(), body, respond)
+    assert "Usage: /lunch remove <name>" in respond.calls[0]
 
-def test_handle_lunch_pick_isolation(db_conn):
-    from db import add_restaurant
-    add_restaurant(db_conn, "T123", "MyPlace", "Loc 1")
+def test_lunch_remove_not_found():
+    """Verify response when trying to remove a non-existent restaurant."""
+    from db import initialize_db
+    conn = initialize_db(":memory:")
     
-    respond = RespondStub()
-    ack = MagicMock()
-    # Pick for a different workspace
-    body = {"team_id": "T999", "text": "pick"}
-    
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert "list is empty" in respond.calls[0]
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
 
-def test_handle_lunch_invalid_subcommand(db_conn):
-    respond = RespondStub()
-    ack = MagicMock()
-    body = {"team_id": "T123", "text": "jump"}
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "remove GhostResto"}
     
-    handle_lunch_command(ack, body, respond, db_conn)
-    assert "Unknown command" in respond.calls[0]
+    handler_func(MagicMock(), body, respond)
+    assert "not found" in respond.calls[0].lower()
+
+def test_lunch_remove_success():
+    """Verify successful removal of a restaurant via slash command."""
+    from db import initialize_db, add_restaurant
+    conn = initialize_db(":memory:")
+    add_restaurant(conn, "T1", "ToDelete", "Address")
+    
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "remove ToDelete"}
+    
+    handler_func(MagicMock(), body, respond)
+    assert "Removed restaurant: *ToDelete*" in respond.calls[0]
+    
+    # Verify DB state
+    from db import list_restaurants
+    assert len(list_restaurants(conn, "T1")) == 0
+
+def test_lunch_list_empty():
+    """Verify response when listing an empty restaurant list."""
+    from db import initialize_db
+    conn = initialize_db(":memory:")
+    
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "list"}
+    
+    handler_func(MagicMock(), body, respond)
+    assert "no restaurants have been added yet" in respond.calls[0].lower()
+
+def test_lunch_list_success():
+    """Verify response when listing multiple restaurants."""
+    from db import initialize_db, add_restaurant
+    conn = initialize_db(":memory:")
+    add_restaurant(conn, "T1", "Burger Joint", "1st Street")
+    add_restaurant(conn, "T1", "Salad Bar", "2nd Avenue")
+    
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "list"}
+    
+    handler_func(MagicMock(), body, respond)
+    
+    response_text = respond.calls[0]
+    assert "Burger Joint" in response_text
+    assert "1st Street" in response_text
+    assert "Salad Bar" in response_text
+    assert "2nd Avenue" in response_text
+
+def test_lunch_pick_empty():
+    """Verify response when picking from an empty list."""
+    from db import initialize_db
+    conn = initialize_db(":memory:")
+    
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "pick"}
+    
+    handler_func(MagicMock(), body, respond)
+    assert "no restaurants have been added yet" in respond.calls[0].lower()
+
+def test_lunch_pick_success():
+    """Verify response when picking returns a restaurant."""
+    from db import initialize_db, add_restaurant
+    conn = initialize_db(":memory:")
+    add_restaurant(conn, "T1", "Target Resto", "Target Addr")
+    
+    mock_app = MagicMock()
+    handler_captor = MagicMock()
+    mock_app.command.return_value = handler_captor
+    register_commands(mock_app, conn)
+    handler_func = handler_captor.call_args[0][0]
+
+    respond = MockRespond()
+    body = {"team_id": "T1", "text": "pick"}
+    
+    handler_func(MagicMock(), body, respond)
+    
+    response_text = respond.calls[0]
+    assert "How about: *Target Resto*" in response_text
+    assert "Target Addr" in response_text

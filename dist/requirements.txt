@@ -1,2 +1,2 @@
-pytest==8.2.2
-slack-bolt==1.18.0
+slack-bolt>=1.18.0
+pytest>=8.0.0

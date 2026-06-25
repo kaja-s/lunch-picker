@@ -2,35 +2,43 @@ import os
 import logging
 from slack_bolt import App
 from db import initialize_db
-from commands import handle_lunch_command
+from commands import register_commands
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-# Load configuration from environment
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
-PORT = int(os.environ.get("PORT", 3000))
-DB_PATH = os.environ.get("DB_PATH", "lunch.db")
-
-if not SLACK_BOT_TOKEN or not SLACK_SIGNING_SECRET:
-    raise ValueError("SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET must be set in environment.")
-
-# Initialize Bolt App
+# Initialize Slack Bolt App
+# Signing secret is required for HTTP mode (Request Verification)
 app = App(
-    token=SLACK_BOT_TOKEN,
-    signing_secret=SLACK_SIGNING_SECRET
+    token=os.environ.get("SLACK_BOT_TOKEN"),
+    signing_secret=os.environ.get("SLACK_SIGNING_SECRET"),
+    token_verification_enabled=False
 )
 
 # Initialize Database
-db_conn = initialize_db(DB_PATH)
+db_path = os.environ.get("LUNCH_PICKER_DB", "lunch_picker.db")
+db_conn = None
+try:
+    db_conn = initialize_db(db_path)
+except Exception as e:
+    logger.error(f"Fatal error: Could not initialize database: {e}")
+    exit(1)
 
-@app.command("/lunch")
-def lunch_command(ack, body, respond):
-    """Routes the /lunch slash command to the logic handler."""
-    handle_lunch_command(ack, body, respond, db_conn)
+# Register Slash Command Handlers
+register_commands(app, db_conn)
 
 if __name__ == "__main__":
-    logger.info(f"Starting Slack bot on port {PORT}...")
-    app.start(port=PORT)
+    # Start the app using the built-in HTTP server
+    port = int(os.environ.get("PORT", 3000))
+    
+    if not os.environ.get("SLACK_BOT_TOKEN"):
+        logger.error("Environment variable SLACK_BOT_TOKEN is missing.")
+    if not os.environ.get("SLACK_SIGNING_SECRET"):
+        logger.error("Environment variable SLACK_SIGNING_SECRET is missing.")
+        
+    logger.info(f"Starting Lunch Picker bot on port {port}")
+    app.start(port=port)

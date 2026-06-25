@@ -1,9 +1,18 @@
 ---
-requires: [db]
 description: A Slack bot that helps teams decide where to eat lunch by picking a restaurant fairly.
 ---
 
 ***definitions***
+
+- :Restaurant: is a place to eat that a team considers for lunch.
+  - Name - the restaurant's name (required)
+  - Address - a physical address or URL identifying the location (required)
+
+- :RestaurantList: is the collection of :Restaurant: entries for a Slack workspace.
+  - One :RestaurantList: exists per workspace.
+  - Any workspace member can add or remove :Restaurant: entries.
+
+- :SlackWorkspace: is the Slack workspace the bot is installed in.
 
 - :SlackUser: is a member of :SlackWorkspace: who interacts with the bot.
 
@@ -11,8 +20,12 @@ description: A Slack bot that helps teams decide where to eat lunch by picking a
 
 - :Implementation: should be in Python 3.12.
 - :Implementation: should use pip for dependency management.
+- :Implementation: should use SQLite (via the standard library `sqlite3` module) for persistent storage.
+  - The SQLite database file path should be configurable via an environment variable, defaulting to `lunch_picker.db`.
+- :Implementation: should store :RestaurantList: entries in a single SQLite table keyed by workspace ID.
 - :Implementation: should use Slack Bolt for Python (`slack_bolt`) to handle slash commands and request verification.
-- :Implementation: should follow a flat package structure with two additional modules on top of `db.py`:
+- :Implementation: should follow a flat package structure with three modules:
+  - `db.py` — all database access (create table, add, remove, list, pick restaurants).
   - `app.py` — entry point; initialises the Bolt app and starts the HTTP server.
   - `commands.py` — slash command handlers for `/lunch` sub-commands.
 - Slash command handlers in `commands.py` must use `respond` instead of `say` to reply to users.
@@ -20,11 +33,34 @@ description: A Slack bot that helps teams decide where to eat lunch by picking a
   - `say` requires the bot to be a member of the channel and must not be used.
 - :UnitTests: should use pytest.
 - :UnitTests: should live in a `tests/` directory at the project root.
-  - Test files should be named `test_<module>.py` (e.g. `test_commands.py`).
+  - Test files should be named `test_<module>.py` (e.g. `test_commands.py`, `test_db.py`).
+- :UnitTests: should use an in-memory SQLite database (pass `check_same_thread=False` to sqlite3).
 - :UnitTests: should mock Slack Bolt's `respond` callable with a simple stub to capture bot replies.
 - :UnitTests: are executed via [test_scripts/run_unittests_python.sh](test_scripts/run_unittests_python.sh).
 
 ***functional specs***
+
+- Implement `initialize_db(db_path)` in `db.py` to set up the SQLite database.
+  - Open a connection to the file at `db_path`.
+  - Create the restaurants table if it does not exist.
+  - The table stores workspace_id, name, and address for each :Restaurant:.
+  - Return the open database connection.
+
+- Implement `add_restaurant(conn, workspace_id, name, address)` in `db.py`.
+  - Insert a new :Restaurant: row for the given workspace.
+  - Raise an error if a :Restaurant: with the same name already exists in that workspace.
+
+- Implement `remove_restaurant(conn, workspace_id, name)` in `db.py`.
+  - Delete the :Restaurant: row matching the given workspace and name.
+  - Return True if a row was deleted, False if no matching row was found.
+
+- Implement `list_restaurants(conn, workspace_id)` in `db.py`.
+  - Return all :Restaurant: entries for the given workspace as a list of (name, address) pairs.
+  - Return an empty list if :RestaurantList: is empty.
+
+- Implement `pick_restaurant(conn, workspace_id)` in `db.py`.
+  - Return a randomly selected (name, address) pair from the given workspace's :RestaurantList:.
+  - Return null if :RestaurantList: is empty.
 
 - Implement the entry point for the Slack bot.
   - The bot listens for incoming slash command requests on a configurable HTTP port.
